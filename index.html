@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>4MS English Champions</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial,sans-serif;background:linear-gradient(160deg,#141a3d,#2b1457);color:#fff;min-height:100vh;font-size:18px}
+#app{max-width:520px;margin:0 auto;padding:16px}
+h1{font-size:26px;text-align:center;margin:8px 0}h2{font-size:21px;margin:6px 0}
+.card{background:rgba(255,255,255,.09);border-radius:16px;padding:16px;margin:12px 0}
+input{width:100%;padding:14px;border-radius:12px;border:2px solid #5b5fa8;background:#0f1230;color:#fff;font-size:18px;margin:6px 0}
+button{width:100%;padding:15px;border:0;border-radius:12px;background:#ffb703;color:#222;font-size:19px;font-weight:700;margin:6px 0;cursor:pointer}
+button.alt{background:#3a3f85;color:#fff}button:disabled{opacity:.5}
+.opt{background:#2f3578;color:#fff;text-align:left}
+.av{display:inline-block;font-size:34px;padding:6px 10px;border-radius:12px;cursor:pointer;border:3px solid transparent}.av.sel{border-color:#ffb703;background:#ffffff22}
+.msg{color:#ffd166;min-height:24px;font-size:16px}
+.bar{height:12px;background:#ffffff22;border-radius:8px;overflow:hidden;margin:8px 0}.bar>div{height:100%;background:#06d6a0;transition:width .25s}
+.row{display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px}.row.me{background:#ffb70333}
+.row b{flex:1}.small{font-size:14px;opacity:.8}.good{color:#06d6a0}.bad{color:#ff6b6b}
+.tabs{display:flex;gap:8px}.tabs button{flex:1}
+</style></head><body><div id="app">Loading…</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const SB_URL='https://wrbpwaejlxjjramarepu.supabase.co';
+const SB_KEY='sb_publishable_u4bFCdKOIJXOpEdk49PRYw_7nzzCX4l';
+const sb=window.supabase.createClient(SB_URL,SB_KEY);
+const $=s=>document.querySelector(s);
+const app=document.getElementById('app');
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const AV=['🦊','🐯','🦁','🐼','🦅','🐲'];
+const NICK=/^[A-Za-z0-9][A-Za-z0-9_.-]{1,19}$/;
+const emailOf=n=>n.trim().toLowerCase()+'@students.champions.app';
+let me=null,avatar=AV[0],tab='reg',G=null,timer=null;
+const show=h=>{app.innerHTML=h};
+const msg=t=>{const m=$('#msg');if(m)m.textContent=t;return false};
+
+function authScreen(note){
+  const reg=tab==='reg';
+  show(`<h1>🏆 4MS English Champions</h1>
+  <div class="card"><div class="tabs"><button class="${reg?'':'alt'}" onclick="tab='reg';authScreen()">Register</button><button class="${reg?'alt':''}" onclick="tab='log';authScreen()">Login</button></div>
+  <input id="nick" placeholder="Nickname (letters/numbers, no spaces)" autocapitalize="none" autocomplete="username">
+  ${reg?'<input id="code" placeholder="Class code from your teacher" autocapitalize="characters">':''}
+  <input id="pw" type="password" placeholder="Password (min 6 characters)" autocomplete="current-password">
+  ${reg?'<div>Choose your hero:</div><div>'+AV.map(a=>`<span class="av ${a===avatar?'sel':''}" onclick="avatar='${a}';authScreen()">${a}</span>`).join('')+'</div>':''}
+  <button id="go" onclick="${reg?'register()':'login()'}">${reg?'Start the adventure!':'Login'}</button>
+  <div class="msg" id="msg">${esc(note||'')}</div></div>`);
+}
+function busy(b){const g=$('#go');if(g)g.disabled=b}
+async function register(){
+  const nick=$('#nick').value.trim(),code=$('#code').value.trim(),pw=$('#pw').value;
+  if(!NICK.test(nick))return msg('Nickname: 2-20 letters or numbers, no spaces.');
+  if(!code)return msg('Enter the class code from your teacher.');
+  if(pw.length<6)return msg('Password must have at least 6 characters.');
+  busy(true);msg('Please wait…');
+  const {data,error}=await sb.auth.signUp({email:emailOf(nick),password:pw});
+  if(error){
+    if(/already/i.test(error.message)){
+      const r=await sb.auth.signInWithPassword({email:emailOf(nick),password:pw});
+      if(r.error){busy(false);return msg('This nickname is taken. Choose another nickname.');}
+    }else{busy(false);return msg(error.message);}
+  }else if(!data.session){busy(false);return msg('SETUP PROBLEM: tell your teacher "email confirmation is still ON".');}
+  const j=await sb.rpc('join_class',{p_code:code,p_nickname:nick,p_avatar:avatar});
+  busy(false);
+  if(j.error){
+    if(/already registered/.test(j.error.message))return boot();
+    return msg(/invalid class code/.test(j.error.message)?'Wrong class code. Ask your teacher.':j.error.message);
+  }
+  boot();
+}
+async function login(){
+  const nick=$('#nick').value.trim(),pw=$('#pw').value;
+  busy(true);
+  const r=await sb.auth.signInWithPassword({email:emailOf(nick),password:pw});
+  busy(false);
+  if(r.error)return msg('Wrong nickname or password.');
+  boot();
+}
+async function logout(){await sb.auth.signOut();me=null;tab='log';authScreen()}
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)return authScreen();
+  const {data:st}=await sb.from('students').select('*').eq('id',session.user.id).maybeSingle();
+  if(!st){await sb.auth.signOut();return authScreen('Account not completed. Register again with the class code.');}
+  me=st;home();
+}
+async function home(){
+  show('<h1>Loading…</h1>');
+  const [lb,pg,st]=await Promise.all([sb.rpc('class_leaderboard'),sb.from('progress').select('*'),sb.from('students').select('*').eq('id',me.id).single()]);
+  if(st.data)me=st.data;
+  const p1=(pg.data||[]).find(x=>x.world===1&&x.level===1);
+  const rows=(lb.data||[]).map(r=>`<div class="row ${r.is_me?'me':''}"><span>${r.rank<=3?['🥇','🥈','🥉'][r.rank-1]:r.rank+'.'}</span><span>${esc(r.avatar)}</span><b>${esc(r.nickname)}</b><span>${r.total_score} pts</span><span class="small">${r.accuracy}%</span></div>`).join('')||'<div class="small">No players yet.</div>';
+  show(`<h1>${esc(me.avatar)} ${esc(me.nickname)}</h1>
+  <div class="card">⭐ XP: <b>${me.xp}</b> &nbsp; 🪙 Coins: <b>${me.coins}</b> &nbsp; 🔥 Streak: <b>${me.streak}</b><br>Total score: <b>${me.total_score}</b></div>
+  <div class="card"><h2>🏰 World 1: The Past Masters</h2><div class="small">Past Simple Passive</div>
+  <button onclick="startLevel(1,1)">▶ Level 1 – Beginner ${p1&&p1.completed?'✅':''}</button>
+  ${p1?`<div class="small">Best score: ${p1.best_score} · Attempts: ${p1.attempts}</div>`:''}
+  <div class="small">Levels 2 and 3, and Worlds 2–5, are coming soon.</div></div>
+  <div class="card"><h2>🏆 My Class Leaderboard</h2>${rows}</div>
+  <button class="alt" onclick="home()">🔄 Refresh</button><button class="alt" onclick="logout()">Logout</button>`);
+}
+async function startLevel(w,l){
+  const r=await sb.rpc('start_session',{p_world:w,p_level:l});
+  if(r.error)return alert('Cannot start: '+r.error.message);
+  G={sid:r.data.session_id,qs:r.data.questions,i:0,score:0,ok:0};
+  ask();
+}
+function ask(){
+  const q=G.qs[G.i];G.cur=q;G.done=false;
+  const opts=Array.isArray(q.options)?q.options:null;
+  show(`<div class="small">Question ${G.i+1} / ${G.qs.length} · Score ${G.score}</div>
+  <div class="bar"><div style="width:${G.i/G.qs.length*100}%"></div></div>
+  <div class="card"><h2>${esc(q.prompt)}</h2>
+  ${opts?opts.map((o,k)=>`<button class="opt" onclick="answer(${k})">${esc(o)}</button>`).join(''):'<input id="ans" placeholder="Type your answer" autocapitalize="none"><button onclick="answerText()">Check</button>'}
+  <div class="bar"><div id="tb" style="width:100%;background:#ffb703"></div></div><div class="small" id="tt"></div></div>
+  <div id="fb"></div>`);
+  sb.rpc('mark_ready',{p_session:G.sid}).then(()=>{});
+  const end=Date.now()+q.time_limit_ms;clearInterval(timer);
+  timer=setInterval(()=>{const left=end-Date.now();
+    const tb=$('#tb');if(tb)tb.style.width=Math.max(0,left/q.time_limit_ms*100)+'%';
+    const tt=$('#tt');if(tt)tt.textContent=Math.max(0,Math.ceil(left/1000))+' s';
+    if(left<=0){clearInterval(timer);send('')}},250);
+}
+function answer(k){send(G.cur.options[k])}
+function answerText(){send($('#ans').value)}
+async function send(a){
+  if(G.done)return;G.done=true;clearInterval(timer);
+  document.querySelectorAll('button').forEach(b=>b.disabled=true);
+  const r=await sb.rpc('submit_answer',{p_session:G.sid,p_question:G.cur.id,p_answer:a});
+  if(r.error){return show('<div class="card">Error: '+esc(r.error.message)+'</div><button onclick="home()">Back</button>')}
+  const d=r.data;G.score+=d.points;if(d.correct)G.ok++;
+  const last=G.i>=G.qs.length-1;
+  $('#fb').innerHTML=`<div class="card"><h2 class="${d.correct?'good':'bad'}">${d.correct?'✅ Correct! +'+d.points:'❌ Not correct'}</h2>
+  ${d.correct?'':'<div>Correct answer: <b>'+esc(d.correct_answer)+'</b></div>'}<div class="small">${esc(d.explanation)}</div>
+  <button onclick="${last?'finish()':'G.i++;ask()'}">${last?'Finish 🏁':'Next ➜'}</button></div>`;
+  window.scrollTo(0,document.body.scrollHeight);
+}
+async function finish(){
+  const r=await sb.rpc('finish_session',{p_session:G.sid});
+  if(r.error)return alert(r.error.message);
+  const d=r.data;
+  show(`<h1>${d.passed?'🎉 Level Complete!':'💪 Keep Practising!'}</h1>
+  <div class="card"><h2>${d.correct} / ${d.total} correct</h2>Score: <b>${d.score}</b><br>XP gained: <b>+${d.xp_gained}</b><br>Coins: <b>+${d.coins_gained}</b>
+  <div class="small">${d.passed?'You passed (60% or more).':'You need 60% to pass. Try again!'}</div></div>
+  <button onclick="home()">🏠 Back to Academy</button>`);
+}
+sb.auth.onAuthStateChange(()=>{});
+boot();
+</script></body></html>
