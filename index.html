@@ -48,7 +48,6 @@ function busy(b){const g=$('#go');if(g)g.disabled=b}
 async function register(){
   const nick=$('#nick').value.trim(),code=$('#code').value.trim(),pw=$('#pw').value;
   if(!NICK.test(nick))return msg('Nickname: 2-20 letters or numbers, no spaces.');
-  if(!code)return msg('Enter the class code from your teacher.');
   if(pw.length<6)return msg('Password must have at least 6 characters.');
   busy(true);msg('Please wait…');
   const {data,error}=await sb.auth.signUp({email:emailOf(nick),password:pw});
