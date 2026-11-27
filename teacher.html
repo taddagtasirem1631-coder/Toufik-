@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Teacher Dashboard</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial,sans-serif;background:#10142e;color:#fff;font-size:17px}
+#app{max-width:900px;margin:0 auto;padding:14px}
+.card{background:#ffffff14;border-radius:14px;padding:14px;margin:12px 0;overflow-x:auto}
+input{width:100%;padding:12px;border-radius:10px;border:2px solid #5b5fa8;background:#0b0e22;color:#fff;font-size:17px;margin:5px 0}
+button{padding:12px 16px;border:0;border-radius:10px;background:#ffb703;color:#222;font-size:16px;font-weight:700;margin:5px 4px 5px 0;cursor:pointer}
+button.alt{background:#3a3f85;color:#fff}
+table{border-collapse:collapse;width:100%;font-size:15px}th,td{padding:7px;border-bottom:1px solid #ffffff30;text-align:left;white-space:nowrap}
+.code{font-size:26px;letter-spacing:3px;color:#06d6a0;font-weight:800}.bad{color:#ff6b6b}.good{color:#06d6a0}.msg{color:#ffd166}
+</style></head><body><div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const sb=window.supabase.createClient('https://wrbpwaejlxjjramarepu.supabase.co','sb_publishable_u4bFCdKOIJXOpEdk49PRYw_7nzzCX4l');
+const $=s=>document.querySelector(s),app=document.getElementById('app');
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const TOPICS={past_passive:'Past Passive',as_as:'As…as',because_since:'Because/Since',therefore_result:'Therefore/As a result',landmarks:'Landmarks',vocabulary:'Vocabulary'};
+let rowsCache=[];
+function login(note){app.innerHTML=`<h1>👩‍🏫 Teacher Dashboard</h1><div class="card"><input id="em" type="email" placeholder="Your email" autocapitalize="none"><input id="pw" type="password" placeholder="Password"><button onclick="doLogin()">Login</button><div class="msg" id="msg">${esc(note||'')}</div></div>`}
+async function doLogin(){
+  const r=await sb.auth.signInWithPassword({email:$('#em').value.trim(),password:$('#pw').value});
+  if(r.error)return $('#msg').textContent='Wrong email or password.';
+  start();
+}
+async function start(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)return login();
+  const t=await sb.from('teachers').select('user_id');
+  if(!t.data||!t.data.length){await sb.auth.signOut();return login('This account is not a teacher account.')}
+  dash();
+}
+async function dash(){
+  app.innerHTML='<h1>Loading…</h1>';
+  const [cl,st,ts]=await Promise.all([
+    sb.from('classes').select('*').order('created_at'),
+    sb.from('students').select('id,nickname,total_score,xp,last_active,created_at,class_id,classes(name)').order('total_score',{ascending:false}),
+    sb.from('student_topic_stats').select('*')]);
+  const classes=cl.data||[],students=st.data||[],stats=ts.data||[];
+  const byStu={};stats.forEach(s=>{(byStu[s.student_id]=byStu[s.student_id]||[]).push(s)});
+  rowsCache=students.map(s=>{
+    const t=byStu[s.id]||[];const att=t.reduce((a,b)=>a+b.attempts,0),ok=t.reduce((a,b)=>a+b.correct,0);
+    const sorted=[...t].sort((a,b)=>a.accuracy-b.accuracy);
+    return {nick:s.nickname,cls:s.classes?s.classes.name:'',score:s.total_score,xp:s.xp,acc:att?Math.round(100*ok/att):'',
+      last:s.last_active?new Date(s.last_active).toLocaleString():'',reg:new Date(s.created_at).toLocaleDateString(),
+      topics:t.map(x=>`${TOPICS[x.topic]||x.topic} ${x.accuracy}%`).join(' | '),weak:sorted.length?(TOPICS[sorted[0].topic]||sorted[0].topic):''};
+  });
+  app.innerHTML=`<h1>👩‍🏫 Teacher Dashboard</h1>
+  <div class="card"><h2>Classes & access codes</h2>
+  <input id="cn" placeholder="New class name (example: 4MS 1)"><button onclick="addClass()">Create class + code</button><div class="msg" id="msg"></div>
+  <table><tr><th>Class</th><th>Access code</th><th></th></tr>${classes.map(c=>`<tr><td>${esc(c.name)}</td><td class="code">${esc(c.access_code)}</td><td><button class="alt" onclick="newCode('${c.id}')">New code</button></td></tr>`).join('')}</table></div>
+  <div class="card"><h2>Students (${students.length})</h2><button onclick="csv()">⬇ Export CSV (opens in Excel)</button><button class="alt" onclick="dash()">🔄 Refresh</button>
+  <table><tr><th>#</th><th>Nickname</th><th>Class</th><th>Score</th><th>XP</th><th>Accuracy</th><th>Weakest topic</th><th>Last active</th><th>Registered</th></tr>
+  ${rowsCache.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.nick)}</td><td>${esc(r.cls)}</td><td>${r.score}</td><td>${r.xp}</td><td>${r.acc===''?'-':r.acc+'%'}</td><td class="bad">${esc(r.weak)}</td><td>${esc(r.last)}</td><td>${esc(r.reg)}</td></tr>`).join('')}</table></div>
+  <div class="card"><h2>Accuracy by topic (each student)</h2><table><tr><th>Student</th><th>Topics</th></tr>${rowsCache.map(r=>`<tr><td>${esc(r.nick)}</td><td>${esc(r.topics||'no answers yet')}</td></tr>`).join('')}</table></div>
+  <button class="alt" onclick="sb.auth.signOut().then(()=>login())">Logout</button>`;
+}
+async function addClass(){
+  const n=$('#cn').value.trim();if(!n)return $('#msg').textContent='Type a class name first.';
+  const r=await sb.rpc('create_class',{p_name:n});
+  if(r.error)return $('#msg').textContent=r.error.message;dash();
+}
+async function newCode(id){const r=await sb.rpc('regenerate_code',{p_class:id});if(r.error)alert(r.error.message);dash()}
+function csv(){
+  const h=['Nickname','Class','Score','XP','Accuracy %','Weakest topic','Topics','Last active','Registered'];
+  const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
+  const lines=[h.map(q).join(',')].concat(rowsCache.map(r=>[r.nick,r.cls,r.score,r.xp,r.acc,r.weak,r.topics,r.last,r.reg].map(q).join(',')));
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv'}));a.download='results.csv';a.click();
+}
+start();
+</script></body></html>
